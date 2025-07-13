@@ -6,13 +6,13 @@ import {
 import {
   WagmiConfig,
   createClient,
-  configureChains,
-  chain
+  configureChains
 } from 'wagmi';
+import { bsc } from 'wagmi/chains';
 import { publicProvider } from 'wagmi/providers/public';
 
 const { chains, provider } = configureChains(
-  [chain.bsc],
+  [bsc],
   [publicProvider()]
 );
 
