@@ -7,7 +7,8 @@ import { motion } from "framer-motion";
 const PANCAKESWAP_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 const routerAbi = [
   "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
-  "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)"
+  "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)",
+  "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) returns (uint[] memory amounts)"
 ];
 
 export default function SwapForm() {
@@ -15,7 +16,8 @@ export default function SwapForm() {
   const { data: walletClient } = useWalletClient();
 
   const [amountIn, setAmountIn] = useState("");
-  const [tokenOut, setTokenOut] = useState(tokenList[1]); // default to CAKE
+  const [tokenIn, setTokenIn] = useState(tokenList[0]); // BNB
+  const [tokenOut, setTokenOut] = useState(tokenList[1]); // CAKE
   const [quote, setQuote] = useState(null);
   const [status, setStatus] = useState("");
   const [txHash, setTxHash] = useState(null);
@@ -24,17 +26,14 @@ export default function SwapForm() {
   const fetchQuote = async () => {
     try {
       if (!walletClient || !amountIn) return;
-      const router = {
-        address: PANCAKESWAP_ROUTER,
-        abi: routerAbi
-      };
 
       const result = await walletClient.readContract({
-        ...router,
+        address: PANCAKESWAP_ROUTER,
+        abi: routerAbi,
         functionName: "getAmountsOut",
         args: [
           parseEther(amountIn),
-          [tokenList[0].address, tokenOut.address]
+          [tokenIn.address, tokenOut.address]
         ]
       });
 
@@ -47,7 +46,7 @@ export default function SwapForm() {
 
   useEffect(() => {
     fetchQuote();
-  }, [amountIn, tokenOut]);
+  }, [amountIn, tokenIn, tokenOut]);
 
   const handleSwap = async () => {
     if (!walletClient || !address) return;
@@ -58,22 +57,40 @@ export default function SwapForm() {
 
     try {
       const deadline = Math.floor(Date.now() / 1000) + 600;
+      let hash;
 
-      const tx = await walletClient.writeContract({
-        address: PANCAKESWAP_ROUTER,
-        abi: routerAbi,
-        functionName: "swapExactETHForTokens",
-        args: [
-          0, // minimum output, slippage logic can go here
-          [tokenList[0].address, tokenOut.address],
-          address,
-          deadline
-        ],
-        value: parseEther(amountIn)
-      });
+      if (tokenIn.isNative) {
+        // BNB → token (e.g., CAKE)
+        hash = await walletClient.writeContract({
+          address: PANCAKESWAP_ROUTER,
+          abi: routerAbi,
+          functionName: "swapExactETHForTokens",
+          args: [
+            0, // minimum amount out
+            [tokenIn.address, tokenOut.address],
+            address,
+            deadline
+          ],
+          value: parseEther(amountIn)
+        });
+      } else {
+        // Token → BNB (optional extension — add approval before this)
+        hash = await walletClient.writeContract({
+          address: PANCAKESWAP_ROUTER,
+          abi: routerAbi,
+          functionName: "swapExactTokensForETH",
+          args: [
+            parseEther(amountIn),
+            0,
+            [tokenIn.address, tokenOut.address],
+            address,
+            deadline
+          ]
+        });
+      }
 
-      setStatus("Swap submitted successfully.");
-      setTxHash(tx);
+      setStatus("Swap sent successfully.");
+      setTxHash(hash);
     } catch (err) {
       setStatus("Swap failed: " + err.message);
     } finally {
@@ -82,34 +99,64 @@ export default function SwapForm() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-gray-900 p-6 rounded-xl w-full max-w-md shadow-lg">
-      <label className="block mb-1">Swap From:</label>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="bg-gray-900 p-6 rounded-xl w-full max-w-md shadow-lg"
+    >
+      <h2 className="text-white text-lg mb-3 font-semibold">Token Swap</h2>
+
+      <label className="text-sm text-gray-300">Swap From:</label>
+      <div className="flex items-center gap-2 mb-2">
+        <img src={tokenIn.logo} alt={tokenIn.symbol} className="w-6 h-6" />
+        <span className="text-white font-medium">{tokenIn.symbol}</span>
+      </div>
+
       <input
         type="number"
         className="w-full p-2 mb-3 rounded bg-gray-800 text-white"
-        placeholder="Enter BNB amount"
+        placeholder="Amount"
         value={amountIn}
         onChange={(e) => setAmountIn(e.target.value)}
       />
 
-      <label className="block mb-1">Swap To:</label>
+      <button
+        onClick={() => {
+          const prev = tokenIn;
+          setTokenIn(tokenOut);
+          setTokenOut(prev);
+          setQuote(null);
+        }}
+        className="text-sm bg-gray-700 text-white px-3 py-1 rounded mb-3 hover:bg-gray-600"
+      >
+        🔁 Swap Tokens
+      </button>
+
+      <label className="text-sm text-gray-300">Swap To:</label>
+      <div className="flex items-center gap-2 mb-2">
+        <img src={tokenOut.logo} alt={tokenOut.symbol} className="w-6 h-6" />
+        <span className="text-white font-medium">{tokenOut.symbol}</span>
+      </div>
+
       <select
         value={tokenOut.symbol}
         onChange={(e) =>
-          setTokenOut(tokenList.find(t => t.symbol === e.target.value))
+          setTokenOut(tokenList.find((t) => t.symbol === e.target.value))
         }
-        className="w-full p-2 mb-4 rounded bg-gray-800 text-white"
+        className="w-full p-2 rounded bg-gray-800 text-white mb-4"
       >
-        {tokenList.slice(1).map((token) => (
-          <option key={token.symbol} value={token.symbol}>
-            {token.symbol}
-          </option>
-        ))}
+        {tokenList
+          .filter((t) => t.symbol !== tokenIn.symbol)
+          .map((token) => (
+            <option key={token.symbol} value={token.symbol}>
+              {token.symbol}
+            </option>
+          ))}
       </select>
 
       {quote && (
-        <p className="text-green-400 mb-2">
-          You’ll receive ≈ <b>{quote}</b> {tokenOut.symbol}
+        <p className="text-green-400 mb-3">
+          ≈ {quote} {tokenOut.symbol}
         </p>
       )}
 
@@ -121,22 +168,18 @@ export default function SwapForm() {
         {loading ? "Swapping..." : "Swap Now"}
       </button>
 
-      {status && <p className="mt-3 text-yellow-400 text-sm">{status}</p>}
+      {status && <p className="mt-3 text-yellow-300 text-sm">{status}</p>}
 
       {txHash && (
         <a
-          className="text-blue-400 text-sm mt-2 inline-block"
           href={`https://bscscan.com/tx/${txHash}`}
           target="_blank"
           rel="noreferrer"
+          className="text-blue-400 mt-2 inline-block text-sm"
         >
-          View transaction on BSCScan
+          View on BscScan
         </a>
       )}
     </motion.div>
   );
 }
-
-
-
- 
