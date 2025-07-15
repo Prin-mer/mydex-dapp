@@ -1,44 +1,64 @@
 import { useState } from "react";
-import axios from "axios";
+import { useAccount, useWalletClient } from "wagmi";
+import { parseEther } from "viem";
+import { motion } from "framer-motion";
+
+const PANCAKESWAP_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
+const CAKE_TOKEN = "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82";
 
 export default function SwapForm() {
-  const [fromToken, setFromToken] = useState("BNB");
-  const [toToken, setToToken] = useState("CAKE");
   const [amount, setAmount] = useState("");
-  const [quote, setQuote] = useState(null);
+  const [status, setStatus] = useState("");
+  const { data: walletClient } = useWalletClient();
+  const { address } = useAccount();
 
-  const getQuote = async (e) => {
-    e.preventDefault();
+  const handleSwap = async () => {
+    if (!walletClient || !address) {
+      setStatus("Wallet not connected");
+      return;
+    }
+
     try {
-      const response = await axios.get(
-        `https://api.pancakeswap.info/api/v2/tokens`
-      );
-      const fromData = Object.values(response.data.data).find(token => token.symbol === fromToken);
-      const toData = Object.values(response.data.data).find(token => token.symbol === toToken);
+      const amountIn = parseEther(amount); // BNB
+      const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 min
+      const routerAbi = [
+        "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)"
+      ];
 
-      if (!fromData || !toData) {
-        setQuote("Token not found");
-        return;
-      }
+      const hash = await walletClient.writeContract({
+        address: PANCAKESWAP_ROUTER,
+        abi: routerAbi,
+        functionName: "swapExactETHForTokens",
+        args: [
+          0, // amountOutMin (use quote for slippage in prod)
+          ["0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", CAKE_TOKEN],
+          address,
+          deadline
+        ],
+        value: amountIn,
+      });
 
-      const price = (parseFloat(amount) * parseFloat(fromData.price)) / parseFloat(toData.price);
-      setQuote(`${amount} ${fromToken} ≈ ${price.toFixed(4)} ${toToken}`);
+      setStatus(`Tx sent: ${hash}`);
     } catch (err) {
       console.error(err);
-      setQuote("Error fetching quote.");
+      setStatus("Swap failed: " + err.message);
     }
   };
 
   return (
-    <div className="bg-gray-100 dark:bg-gray-800 p-6 rounded shadow-md max-w-md mx-auto mt-10">
-      <h2 className="text-xl font-semibold mb-4">🔁 Swap Tokens</h2>
-      <form onSubmit={getQuote} className="flex flex-col gap-4">
-        <input type="text" value={fromToken} onChange={(e) => setFromToken(e.target.value.toUpperCase())} placeholder="From Token (e.g., BNB)" className="p-2 rounded" />
-        <input type="text" value={toToken} onChange={(e) => setToToken(e.target.value.toUpperCase())} placeholder="To Token (e.g., CAKE)" className="p-2 rounded" />
-        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount" className="p-2 rounded" />
-        <button type="submit" className="bg-blue-500 text-white py-2 rounded hover:bg-blue-600">Get Quote</button>
-      </form>
-      {quote && <p className="mt-4 text-center">{quote}</p>}
-    </div>
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-gray-800 p-6 rounded-xl shadow-xl w-full max-w-md">
+      <label className="block mb-2">Enter BNB Amount:</label>
+      <input
+        type="number"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        className="w-full p-2 rounded bg-gray-900 text-white mb-4"
+        placeholder="e.g. 0.1"
+      />
+      <button onClick={handleSwap} className="bg-green-500 hover:bg-green-600 text-white w-full py-2 rounded">
+        Swap BNB → CAKE
+      </button>
+      {status && <p className="mt-3 text-sm text-yellow-400">{status}</p>}
+    </motion.div>
   );
 }
