@@ -1,64 +1,142 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount, useWalletClient } from "wagmi";
-import { parseEther } from "viem";
+import { formatEther, parseEther } from "viem";
+import { tokenList } from "../lib/tokens";
 import { motion } from "framer-motion";
 
 const PANCAKESWAP_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
-const CAKE_TOKEN = "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82";
+const routerAbi = [
+  "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
+  "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)"
+];
 
 export default function SwapForm() {
-  const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState("");
-  const { data: walletClient } = useWalletClient();
   const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+
+  const [amountIn, setAmountIn] = useState("");
+  const [tokenOut, setTokenOut] = useState(tokenList[1]); // default to CAKE
+  const [quote, setQuote] = useState(null);
+  const [status, setStatus] = useState("");
+  const [txHash, setTxHash] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchQuote = async () => {
+    try {
+      if (!walletClient || !amountIn) return;
+      const router = {
+        address: PANCAKESWAP_ROUTER,
+        abi: routerAbi
+      };
+
+      const result = await walletClient.readContract({
+        ...router,
+        functionName: "getAmountsOut",
+        args: [
+          parseEther(amountIn),
+          [tokenList[0].address, tokenOut.address]
+        ]
+      });
+
+      const amountOut = result[1];
+      setQuote(formatEther(amountOut));
+    } catch (err) {
+      setQuote(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchQuote();
+  }, [amountIn, tokenOut]);
 
   const handleSwap = async () => {
-    if (!walletClient || !address) {
-      setStatus("Wallet not connected");
-      return;
-    }
+    if (!walletClient || !address) return;
+
+    setLoading(true);
+    setStatus("");
+    setTxHash(null);
 
     try {
-      const amountIn = parseEther(amount); // BNB
-      const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 min
-      const routerAbi = [
-        "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) payable returns (uint[] memory amounts)"
-      ];
+      const deadline = Math.floor(Date.now() / 1000) + 600;
 
-      const hash = await walletClient.writeContract({
+      const tx = await walletClient.writeContract({
         address: PANCAKESWAP_ROUTER,
         abi: routerAbi,
         functionName: "swapExactETHForTokens",
         args: [
-          0, // amountOutMin (use quote for slippage in prod)
-          ["0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", CAKE_TOKEN],
+          0, // minimum output, slippage logic can go here
+          [tokenList[0].address, tokenOut.address],
           address,
           deadline
         ],
-        value: amountIn,
+        value: parseEther(amountIn)
       });
 
-      setStatus(`Tx sent: ${hash}`);
+      setStatus("Swap submitted successfully.");
+      setTxHash(tx);
     } catch (err) {
-      console.error(err);
       setStatus("Swap failed: " + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-gray-800 p-6 rounded-xl shadow-xl w-full max-w-md">
-      <label className="block mb-2">Enter BNB Amount:</label>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-gray-900 p-6 rounded-xl w-full max-w-md shadow-lg">
+      <label className="block mb-1">Swap From:</label>
       <input
         type="number"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        className="w-full p-2 rounded bg-gray-900 text-white mb-4"
-        placeholder="e.g. 0.1"
+        className="w-full p-2 mb-3 rounded bg-gray-800 text-white"
+        placeholder="Enter BNB amount"
+        value={amountIn}
+        onChange={(e) => setAmountIn(e.target.value)}
       />
-      <button onClick={handleSwap} className="bg-green-500 hover:bg-green-600 text-white w-full py-2 rounded">
-        Swap BNB → CAKE
+
+      <label className="block mb-1">Swap To:</label>
+      <select
+        value={tokenOut.symbol}
+        onChange={(e) =>
+          setTokenOut(tokenList.find(t => t.symbol === e.target.value))
+        }
+        className="w-full p-2 mb-4 rounded bg-gray-800 text-white"
+      >
+        {tokenList.slice(1).map((token) => (
+          <option key={token.symbol} value={token.symbol}>
+            {token.symbol}
+          </option>
+        ))}
+      </select>
+
+      {quote && (
+        <p className="text-green-400 mb-2">
+          You’ll receive ≈ <b>{quote}</b> {tokenOut.symbol}
+        </p>
+      )}
+
+      <button
+        onClick={handleSwap}
+        disabled={loading || !amountIn}
+        className="bg-green-500 hover:bg-green-600 w-full py-2 rounded text-white"
+      >
+        {loading ? "Swapping..." : "Swap Now"}
       </button>
-      {status && <p className="mt-3 text-sm text-yellow-400">{status}</p>}
+
+      {status && <p className="mt-3 text-yellow-400 text-sm">{status}</p>}
+
+      {txHash && (
+        <a
+          className="text-blue-400 text-sm mt-2 inline-block"
+          href={`https://bscscan.com/tx/${txHash}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View transaction on BSCScan
+        </a>
+      )}
     </motion.div>
   );
 }
+
+
+
+ 
