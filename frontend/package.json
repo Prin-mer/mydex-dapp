@@ -1,5 +1,5 @@
 {
-  "name": "mydex-dex",
+  "name": "mydex-frontend",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -14,7 +14,8 @@
     "vite": "^4.4.9",
     "@rainbow-me/rainbowkit": "^0.12.18",
     "wagmi": "^0.12.19",
-    "viem": "^0.3.26"
+    "viem": "^0.3.26",
+    "framer-motion": "^10.12.16"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.4",
