@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ConnectButton, useAccount } from "@rainbow-me/rainbowkit";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useAccount } from "wagmi";
 import { Web3Provider } from "./lib/web3";
 import SwapForm from "./components/SwapForm";
 
